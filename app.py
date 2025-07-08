@@ -1,35 +1,32 @@
-import logging
 import os
+import logging
 from dotenv import load_dotenv
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 
-from db import init_db, update_if_needed, search_knowledge, get_all_context_text
 from text_utils import correct_spelling
-from ai_gigachat import ask_gigachat  # SDK-версия GigaChat
+from db import init_db, update_if_needed, search_knowledge, get_top_context
+from ai_gigachat import ask_gigachat
 
-load_dotenv()
-
-
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-GROUP_ID = os.getenv("VK_GROUP_ID")
+# Загрузка переменных окружения
+load_dotenv()
 VK_API_TOKEN = os.getenv("VK_API_TOKEN")
-
-print(f"[DEBUG] VK_API_TOKEN: {VK_API_TOKEN}")
-print(f"[DEBUG] VK_GROUP_ID: {GROUP_ID}")
+VK_GROUP_ID = os.getenv("VK_GROUP_ID")
 
 
 class VkBot:
     def __init__(self):
         self.vk_session = vk_api.VkApi(token=VK_API_TOKEN)
-        self.longpoll = VkBotLongPoll(self.vk_session, GROUP_ID)
+        self.longpoll = VkBotLongPoll(self.vk_session, group_id=VK_GROUP_ID)
         self.vk = self.vk_session.get_api()
 
         logger.info("Бот успешно запущен")
 
-        # Инициализация базы данных
+        # Инициализация базы и обновление
         init_db()
         update_if_needed()
 
@@ -63,15 +60,35 @@ class VkBot:
             corrected_text = correct_spelling(text)
             logger.info(f"Исправленный текст: {corrected_text}")
 
-            # Поиск в базе
+            # Поиск по базе
             answer = search_knowledge(corrected_text)
 
+            # Проверка: является ли вопрос закрытым (да/нет)
+            yes_no_triggers = [
+                "возможно ли",
+                "можно ли",
+                "нельзя ли",
+                "имею ли право",
+                "допускается ли",
+            ]
+            is_binary = any(
+                trigger in corrected_text.lower() for trigger in yes_no_triggers
+            )
+
+            # Получение релевантного контекста
+            context = get_top_context(corrected_text)
+
+            # Если релевантный ответ найден в базе
             if answer and "Я не нашёл подходящего ответа" not in answer:
                 self.send_message(user_id, answer)
             else:
-                context = get_all_context_text()
                 try:
-                    gpt_answer = ask_gigachat(corrected_text, context)
+                    gpt_answer = ask_gigachat(
+                        user_question=corrected_text,
+                        context_text=context,
+                        external=True,  # использовать знания вне базы, если не нашёл
+                        is_binary=is_binary,  # включить режим да/нет
+                    )
                 except Exception as e:
                     logger.error(f"GigaChat API Error: {e}")
                     gpt_answer = "Произошла ошибка при обращении к GigaChat."
