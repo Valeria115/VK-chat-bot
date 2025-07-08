@@ -5,6 +5,9 @@ import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from text_utils import correct_spelling
 from ai_gigachat import ask_gigachat
+from db import get_intro_text
+from text_utils import contains_profanity
+
 from db import (
     init_db,
     update_if_needed,
@@ -67,6 +70,13 @@ class VkBot:
             corrected_text = correct_spelling(text)
             logger.info(f"Исправленный текст: {corrected_text}")
 
+            if contains_profanity(corrected_text):
+                self.send_message(
+                    user_id,
+                    "⚠️ Пожалуйста, избегайте нецензурной лексики. Я помогу, если вы переформулируете вопрос корректно.",
+                )
+                return
+
             yes_no_triggers = [
                 "возможно ли",
                 "можно ли",
@@ -95,7 +105,12 @@ class VkBot:
                         return
 
             # Получение контекста (только если вопрос относится к VK)
-            context = "" if external else get_top_context(corrected_text, k=6)
+            if external:
+                context = ""
+            else:
+                dynamic = get_top_context(corrected_text, k=6)
+                intro = get_intro_text()
+                context = intro + "\n\n" + dynamic
 
             # Вызов GigaChat
             try:
