@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def get_rendered_html(url):
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.romium.launch(headless=True)
         page = browser.new_page()
         page.goto(url, timeout=60000)
         page.wait_for_load_state("networkidle")
@@ -147,7 +147,6 @@ def generate_help_link(question, top_k=3, threshold=0.5):
     rows = cursor.fetchall()
     conn.close()
 
-    # Список для хранения ссылок, которые подходят по сходству
     relevant_links = []
 
     for title, url, embedding in rows:
@@ -156,21 +155,16 @@ def generate_help_link(question, top_k=3, threshold=0.5):
         content_embedding = np.frombuffer(embedding, dtype=np.float32)
         score = cosine_similarity(query_embedding, content_embedding)
 
-        # Добавляем ссылки, если их сходство больше порога
         if score >= threshold:
             relevant_links.append((score, url))
 
-    # Сортируем ссылки по убыванию сходства и выбираем top_k ссылок
     relevant_links.sort(reverse=True, key=lambda x: x[0])
 
-    # Возвращаем несколько лучших ссылок, если они есть
     top_links = [url for _, url in relevant_links[:top_k]]
 
-    # Если нет достаточно хороших ссылок, возвращаем дефолтную ссылку
     if not top_links:
         return SITE_URL
 
-    # Формируем строку с несколькими ссылками
     return "\n".join(top_links)
 
 

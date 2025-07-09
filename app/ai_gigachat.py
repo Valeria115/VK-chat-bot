@@ -4,13 +4,13 @@ from config import GIGACHAT_AUTH_KEY
 from gigachat import GigaChat
 from gigachat.models import Chat, Messages, MessagesRole
 
-# Отключаем предупреждения SSL
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Настройка логгирования
+
 logging.basicConfig(
-    level=logging.DEBUG,  # Уровень логирования
-    format="%(asctime)s - %(levelname)s - %(message)s",  # Формат вывода
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,6 @@ def ask_gigachat(
 ):
     client = GigaChat(credentials=GIGACHAT_AUTH_KEY, verify_ssl_certs=False)
 
-    # УНИВЕРСАЛЬНЫЙ SYSTEM PROMPT
     if external:
         system_prompt = (
             "Ты — бот-консультант по образовательным проектам VK Education. "
@@ -48,7 +47,6 @@ def ask_gigachat(
         ),
     ]
 
-    # Логгирование запроса
     logger.debug("Отправка запроса к GigaChat")
     logger.debug(f"Вопрос: {user_question}")
     logger.debug(f"Контекст (обрезан): {context_text[:400]}...")
@@ -57,7 +55,6 @@ def ask_gigachat(
         response = client.chat(Chat(messages=messages))
         content = response.choices[0].message.content
 
-        # Логгирование ответа
         logger.debug("Ответ от GigaChat:")
         logger.debug(f"{content[:500]}{'...' if len(content) > 500 else ''}")
 

@@ -19,7 +19,7 @@ from db import (
     list_projects_for_audience,
 )
 
-# Настройка логирования
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -29,14 +29,12 @@ class VkBot:
         logger.info("Запуск бота...")
         start_time = time.time()
 
-        # Инициализация VK API
         self.vk_session = vk_api.VkApi(token=VK_API_TOKEN)
         self.longpoll = VkBotLongPoll(self.vk_session, group_id=VK_GROUP_ID)
         self.vk = self.vk_session.get_api()
 
         logger.info("Инициализация VK API завершена.")
 
-        # Инициализация базы и обновление
         init_db()
         update_if_needed()
 
@@ -91,7 +89,6 @@ class VkBot:
             is_list = is_list_request(corrected_text)
             external = not is_vke_related(corrected_text)
 
-            # Обработка списочного запроса по аудитории
             if is_list:
                 for audience in [
                     "студент",
@@ -107,7 +104,6 @@ class VkBot:
                         self.send_message(user_id, answer)
                         return
 
-            # Получение контекста (только если вопрос относится к VK)
             if external:
                 context = ""
             else:
@@ -115,7 +111,6 @@ class VkBot:
                 intro = get_intro_text()
                 context = intro + "\n\n" + dynamic
 
-            # Вызов GigaChat
             try:
                 logger.info("Запрос к GigaChat...")
                 start_gigachat_time = time.time()
@@ -131,8 +126,6 @@ class VkBot:
                     f"Запрос к GigaChat выполнен за {gigachat_duration:.2f} секунд."
                 )
 
-                # Умная вставка ссылки
-                # Умная вставка нескольких ссылок
                 if not external and any(
                     word in gpt_answer.lower()
                     for word in [
@@ -144,9 +137,7 @@ class VkBot:
                         "vk education",
                     ]
                 ):
-                    links = generate_help_link(
-                        corrected_text, top_k=3
-                    )  # Выбираем топ-3 ссылки
+                    links = generate_help_link(corrected_text, top_k=3)
                     gpt_answer += f"\n\n🔗 Подробнее: \n{links}"
 
             except Exception as e:
