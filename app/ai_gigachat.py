@@ -1,13 +1,18 @@
-import os
+import logging
 import urllib3
-from dotenv import load_dotenv
+from config import GIGACHAT_AUTH_KEY
 from gigachat import GigaChat
 from gigachat.models import Chat, Messages, MessagesRole
 
+# Отключаем предупреждения SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-load_dotenv()
 
-GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
+# Настройка логгирования
+logging.basicConfig(
+    level=logging.DEBUG,  # Уровень логирования
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Формат вывода
+)
+logger = logging.getLogger(__name__)
 
 
 def ask_gigachat(
@@ -28,6 +33,7 @@ def ask_gigachat(
     else:
         system_prompt = (
             "Ты — бот-консультант по образовательным проектам VK Education. "
+            "К тебе часто обращаются за помощью студенты. Будь внимателен, определи статус человека, не выдавай нерелевантную ссылку"
             "Используй только контекст, который тебе предоставлен, чтобы ответить на вопрос. "
             "Если информации недостаточно, честно скажи об этом. "
             "Если вопрос закрытый (да/нет), дай короткий, но обоснованный ответ. "
@@ -42,20 +48,20 @@ def ask_gigachat(
         ),
     ]
 
-    print("[GIGACHAT DEBUG] --- Отправка запроса к GigaChat ---")
-    print(f"[GIGACHAT DEBUG] Вопрос: {user_question}")
-    print(f"[GIGACHAT DEBUG] Контекст (обрезан): {context_text[:400]}...")
-    print("[GIGACHAT DEBUG] ------------------------------------")
+    # Логгирование запроса
+    logger.debug("Отправка запроса к GigaChat")
+    logger.debug(f"Вопрос: {user_question}")
+    logger.debug(f"Контекст (обрезан): {context_text[:400]}...")
 
     try:
         response = client.chat(Chat(messages=messages))
         content = response.choices[0].message.content
 
-        print("[GIGACHAT DEBUG] --- Ответ от GigaChat ---")
-        print(content[:500], "..." if len(content) > 500 else "")
-        print("[GIGACHAT DEBUG] --------------------------")
+        # Логгирование ответа
+        logger.debug("Ответ от GigaChat:")
+        logger.debug(f"{content[:500]}{'...' if len(content) > 500 else ''}")
 
         return content
     except Exception as e:
-        print("❌ Ошибка при обращении к GigaChat SDK:", e)
+        logger.error(f"Ошибка при обращении к GigaChat SDK: {e}")
         return "Произошла ошибка при обращении к GigaChat."

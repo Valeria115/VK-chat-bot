@@ -2,9 +2,10 @@
 __pycache__/
 *.py[codz]
 *$py.class
-
+local_model/
 # C extensions
 *.so
+*.db
 
 # Distribution / packaging
 .Python
@@ -208,3 +209,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+knowledge.db
