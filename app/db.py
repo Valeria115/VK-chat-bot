@@ -1,21 +1,34 @@
-import sqlite3
+import logging
+import os
+
 from datetime import datetime, timedelta
-import asyncio
+import sqlite3
 from bs4 import BeautifulSoup
 from sentence_transformers import SentenceTransformer
 from urllib.parse import urljoin
 from numpy.linalg import norm
 import numpy as np
 from playwright.sync_api import sync_playwright
+from config import DB_PATH, SITE_URL
 
-DB_PATH = "knowledge.db"
-SITE_URL = "https://education.vk.company/"
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model_path = "local_model/all-MiniLM-L6-v2"
+
+if not os.path.exists(model_path):
+    print("Загрузка модели и сохранение локально...")
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    model.save(model_path)
+else:
+    print("Модель уже сохранена локально.")
+
+model = SentenceTransformer(model_path)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def get_rendered_html(url):
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.romium.launch(headless=True)
         page = browser.new_page()
         page.goto(url, timeout=60000)
         page.wait_for_load_state("networkidle")
@@ -38,8 +51,10 @@ def init_db():
             content_embedding BLOB,
             last_updated TIMESTAMP
         )
-    """
+        """
     )
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_title_hash ON knowledge (title)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_url_hash ON knowledge (url)")
 
     cursor.execute(
         """
@@ -47,9 +62,8 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT
         )
-    """
+        """
     )
-
     conn.commit()
     conn.close()
 
@@ -125,7 +139,7 @@ def is_list_request(question):
     return any(word in question.lower() for word in triggers)
 
 
-def generate_help_link(question):
+def generate_help_link(question, top_k=3, threshold=0.5):
     query_embedding = model.encode(question)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -133,23 +147,29 @@ def generate_help_link(question):
     rows = cursor.fetchall()
     conn.close()
 
-    best_score = -1
-    best_url = None
+    relevant_links = []
 
     for title, url, embedding in rows:
         if embedding is None or url is None:
             continue
         content_embedding = np.frombuffer(embedding, dtype=np.float32)
         score = cosine_similarity(query_embedding, content_embedding)
-        if score > best_score:
-            best_score = score
-            best_url = url
 
-    return best_url or SITE_URL
+        if score >= threshold:
+            relevant_links.append((score, url))
+
+    relevant_links.sort(reverse=True, key=lambda x: x[0])
+
+    top_links = [url for _, url in relevant_links[:top_k]]
+
+    if not top_links:
+        return SITE_URL
+
+    return "\n".join(top_links)
 
 
 def fetch_page_data(url):
-    print(f"[INFO] Парсинг: {url}")
+    logger.info(f"Парсинг: {url}")
     html = get_rendered_html(url)
     soup = BeautifulSoup(html, "html.parser")
     parsed = []
@@ -192,7 +212,7 @@ def fetch_site_data():
         try:
             parsed_data.extend(fetch_page_data(link))
         except Exception as e:
-            print(f"[WARNING] Ошибка парсинга {link}: {e}")
+            logger.warning(f"Ошибка парсинга {link}: {e}")
 
     return parsed_data
 
@@ -202,14 +222,17 @@ def save_to_db(data):
     cursor = conn.cursor()
     cursor.execute("DELETE FROM knowledge")
     now = datetime.now()
-    for title, content, url, embedding in data:
-        cursor.execute(
-            """
-            INSERT INTO knowledge (title, content, url, content_embedding, last_updated)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (title, content, url, embedding, now),
-        )
+    cursor.executemany(
+        """
+        INSERT INTO knowledge (title, content, url, content_embedding, last_updated)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (title, content, url, embedding, now)
+            for title, content, url, embedding in data
+        ],
+    )
+
     conn.commit()
     conn.close()
     set_meta_value("last_updated", now.isoformat())
@@ -238,14 +261,14 @@ def update_if_needed():
     if not last_updated or (now - datetime.fromisoformat(last_updated)) > timedelta(
         days=4
     ):
-        print("[DEBUG] Обновление базы знаний с сайта...")
+        logger.debug("Обновление базы знаний с сайта...")
         data = fetch_site_data()
         save_to_db(data)
     else:
-        print("Обновление не требуется.")
+        logger.debug("Обновление не требуется.")
 
 
-def list_projects_for_audience(audience_keyword="школьник"):
+def list_projects_for_audience(audience_keyword="студент"):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT title, content, url FROM knowledge")
@@ -253,16 +276,16 @@ def list_projects_for_audience(audience_keyword="школьник"):
     conn.close()
 
     audience_pages = {
-        "школьник": "/children",
+        "школьник": "/students",
         "студент": "/students",
         "специалист": "/professionals",
         "преподаватель": "/teachers",
-        "учащийся": "/children",
+        "учащийся": "/students",
         "выпускник": "/students",
         "абитуриент": "/students",
     }
 
-    relevant_url = audience_pages.get(audience_keyword.lower())
+    relevant_url = audience_pages["студент"]
     if not relevant_url:
         return "Для указанной категории не найдено подходящего раздела."
 
@@ -273,7 +296,6 @@ def list_projects_for_audience(audience_keyword="школьник"):
         if relevant_url not in url:
             continue
 
-        # --- Специальный случай: не фильтруем по ключам для студентов
         if "/students" in url and audience_keyword.lower() == "студент":
             pass
         else:
@@ -309,7 +331,7 @@ def list_projects_for_audience(audience_keyword="школьник"):
 def get_intro_text():
     """Возвращает общий вводный текст о VK Education (вставляется вручную или парсится один раз)"""
     return (
-        "VK Education — это платформа, включающая множество бесплатных образовательных программ для школьников, студентов и специалистов. "
+        "VK Education — это платформа, включающая множество бесплатных образовательных программ для студентов, школьников и специалистов. "
         "Пользователи могут проходить курсы, участвовать в мероприятиях, подавать заявки на участие в нескольких проектах при условии соответствия требованиям каждой программы. "
         "Участие в нескольких проектах одновременно возможно, если не возникает конфликтов по времени и требованиям."
     )

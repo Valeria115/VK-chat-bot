@@ -1,6 +1,6 @@
-import os
 import logging
-from dotenv import load_dotenv
+import time
+from config import VK_API_TOKEN, VK_GROUP_ID
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from text_utils import correct_spelling
@@ -19,29 +19,30 @@ from db import (
     list_projects_for_audience,
 )
 
-# Настройка логирования
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Загрузка переменных окружения
-load_dotenv()
-VK_API_TOKEN = os.getenv("VK_API_TOKEN")
-VK_GROUP_ID = int(os.getenv("VK_GROUP_ID"))
 
 
 class VkBot:
     def __init__(self):
+        logger.info("Запуск бота...")
+        start_time = time.time()
+
         self.vk_session = vk_api.VkApi(token=VK_API_TOKEN)
         self.longpoll = VkBotLongPoll(self.vk_session, group_id=VK_GROUP_ID)
         self.vk = self.vk_session.get_api()
 
-        logger.info("Бот успешно запущен")
+        logger.info("Инициализация VK API завершена.")
 
-        # Инициализация базы и обновление
         init_db()
         update_if_needed()
 
+        init_duration = time.time() - start_time
+        logger.info(f"Инициализация бота завершена за {init_duration:.2f} секунд.")
+
     def send_message(self, user_id, message):
+        logger.info(f"Отправка сообщения для {user_id}...")
         self.vk.messages.send(
             user_id=user_id,
             message=message,
@@ -88,11 +89,10 @@ class VkBot:
             is_list = is_list_request(corrected_text)
             external = not is_vke_related(corrected_text)
 
-            # Обработка списочного запроса по аудитории
             if is_list:
                 for audience in [
-                    "школьник",
                     "студент",
+                    "школьник",
                     "специалист",
                     "преподаватель",
                     "абитуриент",
@@ -104,7 +104,6 @@ class VkBot:
                         self.send_message(user_id, answer)
                         return
 
-            # Получение контекста (только если вопрос относится к VK)
             if external:
                 context = ""
             else:
@@ -112,8 +111,9 @@ class VkBot:
                 intro = get_intro_text()
                 context = intro + "\n\n" + dynamic
 
-            # Вызов GigaChat
             try:
+                logger.info("Запрос к GigaChat...")
+                start_gigachat_time = time.time()
                 gpt_answer = ask_gigachat(
                     user_question=corrected_text,
                     context_text=context,
@@ -121,8 +121,11 @@ class VkBot:
                     is_binary=is_binary,
                     is_list=is_list,
                 )
+                gigachat_duration = time.time() - start_gigachat_time
+                logger.info(
+                    f"Запрос к GigaChat выполнен за {gigachat_duration:.2f} секунд."
+                )
 
-                # Умная вставка ссылки
                 if not external and any(
                     word in gpt_answer.lower()
                     for word in [
@@ -134,8 +137,8 @@ class VkBot:
                         "vk education",
                     ]
                 ):
-                    link = generate_help_link(corrected_text)
-                    gpt_answer += f"\n\n🔗 Подробнее: {link}"
+                    links = generate_help_link(corrected_text, top_k=3)
+                    gpt_answer += f"\n\n🔗 Подробнее: \n{links}"
 
             except Exception as e:
                 logger.error(f"GigaChat API Error: {e}")
@@ -147,6 +150,7 @@ class VkBot:
             logger.error(f"Ошибка обработки события: {e}")
 
     def run(self):
+        logger.info("Бот запущен и слушает сообщения...")
         for event in self.longpoll.listen():
             if event.type == VkBotEventType.MESSAGE_NEW:
                 self.handle_message(event)
